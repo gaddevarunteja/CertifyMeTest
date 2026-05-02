@@ -1,4 +1,7 @@
-const captchas = { login:'', signup:'', forgot:'' };
+const captchas = { login: '', signup: '', forgot: '' };
+const API_BASE = 'http://127.0.0.1:5000';
+let isEditing = false;
+let editingId = null;
 function generateCaptcha(type) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
     let code = '';
@@ -55,8 +58,8 @@ function checkStrength(val) {
     if (/[A-Z]/.test(val)) score++;
     if (/[0-9]/.test(val)) score++;
     if (/[^A-Za-z0-9]/.test(val)) score++;
-    const labels = ['','Weak','Medium','Strong','Very Strong'];
-    const classes = ['','weak','medium','strong','very-strong'];
+    const labels = ['', 'Weak', 'Medium', 'Strong', 'Very Strong'];
+    const classes = ['', 'weak', 'medium', 'strong', 'very-strong'];
     for (let i = 1; i <= 4; i++) {
         const bar = document.getElementById('str' + i);
         bar.className = 'strength-bar';
@@ -84,6 +87,8 @@ function showDashboard(email) {
 }
 
 function handleLogout() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('admin');
     document.getElementById('dashboardWrapper').classList.remove('active');
     document.getElementById('authWrapper').style.display = 'flex';
     document.body.style.alignItems = '';
@@ -93,14 +98,14 @@ function handleLogout() {
 
 // ===== NAV ITEMS =====
 document.querySelectorAll('.nav-item[data-page]').forEach(item => {
-    item.addEventListener('click', function() {
+    item.addEventListener('click', function () {
         const page = this.getAttribute('data-page');
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         this.classList.add('active');
-        
+
         // Hide all sections
         document.querySelectorAll('.dash-section').forEach(s => s.classList.remove('active'));
-        
+
         // Show selected section
         if (page === 'dashboard') {
             document.getElementById('dashboardSection').classList.add('active');
@@ -117,6 +122,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(item => {
         } else if (page === 'opportunity') {
             document.getElementById('opportunitySection').classList.add('active');
             document.getElementById('pageTitle').textContent = 'Opportunity Management';
+            loadOpportunities();
         } else if (page === 'reports') {
             document.getElementById('reportsSection').classList.add('active');
             document.getElementById('pageTitle').textContent = 'Reports and Analytics';
@@ -145,7 +151,7 @@ function changeChartPeriod(period) {
 
     const linePath = document.getElementById('linePath');
     const lineArea = document.getElementById('lineArea');
-    
+
     const path = chartData[period];
     linePath.setAttribute('d', path);
     lineArea.setAttribute('d', path + ' L400,150 L0,150 Z');
@@ -165,7 +171,7 @@ function markAllRead() {
 }
 
 // Close notification dropdown when clicking outside
-document.addEventListener('click', function(e) {
+document.addEventListener('click', function (e) {
     const dropdown = document.getElementById('notificationDropdown');
     const btn = document.getElementById('notifBtn');
     if (!dropdown.contains(e.target) && !btn.contains(e.target)) {
@@ -179,7 +185,7 @@ function toggleTheme() {
     const currentTheme = html.getAttribute('data-theme');
     const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
     html.setAttribute('data-theme', newTheme);
-    
+
     // Update icon
     const icon = document.getElementById('themeIcon');
     if (newTheme === 'dark') {
@@ -189,6 +195,161 @@ function toggleTheme() {
     }
 }
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function loadOpportunities() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch(`${API_BASE}/api/opportunities`, {
+        method: "GET",
+        headers: { 
+            'Authorization': `Bearer ${token}`,
+            "Content-Type": "application/json"
+        }
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast('Error loading opportunities');
+                return;
+            }
+            const grid = document.querySelector('.opportunities-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+            data.forEach(opp => {
+                const card = document.createElement('div');
+                card.className = 'opportunity-card';
+                const headerHtml = `
+                <div class="opportunity-card-header">
+                    <h5>${escapeHtml(opp.name)}</h5>
+                    <div class="opportunity-meta">
+                        <span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${escapeHtml(opp.duration)}</span>
+                        <span><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${escapeHtml(opp.start_date)}</span>
+                    </div>
+                </div>
+                <p class="opportunity-description">${escapeHtml(opp.description)}</p>
+            `;
+                const skills = opp.skills.split(',').map(s => s.trim());
+                const skillsHtml = `<div class="opportunity-skills"><div class="opportunity-skills-label">Skills You'll Gain</div><div class="skills-tags">
+                ${skills.map(s => `<span class="skill-tag">${escapeHtml(s)}</span>`).join('')}
+            </div></div>`;
+                const applicantsCount = opp.max_applicants ? `${opp.max_applicants} applicants` : '0 applicants';
+                const footerHtml = `
+                <div class="opportunity-footer">
+                    <span class="applicants-count">${escapeHtml(applicantsCount)}</span>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="view-course-btn" onclick="openOpportunityDetails(${opp.id})">View Details</button>
+                        <button class="view-course-btn" onclick="editOpportunity(${opp.id})">Edit</button>
+                        <button class="view-course-btn" onclick="deleteOpportunity(${opp.id})">Delete</button>
+                    </div>
+                </div>
+            `;
+                card.innerHTML = headerHtml + skillsHtml + footerHtml;
+                card.setAttribute('data-id', opp.id);
+                grid.appendChild(card);
+            });
+        })
+        .catch(err => showToast(err + 'Network error'));
+}
+
+function resetOpportunityModal() {
+    isEditing = false;
+    editingId = null;
+
+    const modal = document.getElementById('opportunityModal');
+    const title = modal.querySelector('.modal-header h2');
+    if (title) title.textContent = 'Add New Opportunity';
+
+    const btn = modal.querySelector('#opportunityForm button[type="submit"]');
+    if (btn) btn.textContent = 'Create Opportunity';
+
+    document.getElementById('opportunityForm').reset();
+}
+
+function editOpportunity(id) {
+    const token = localStorage.getItem('token');
+    if (!token) {
+        showToast('Please login first');
+        return;
+    }
+
+    // Open modal first (resets to add state)
+    openOpportunityModal();
+
+    fetch(`${API_BASE}/api/opportunities/${id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            showToast(data.error);
+            return;
+        }
+
+        // wait a tick to ensure DOM is ready (important for some modal libs)
+        setTimeout(() => {
+            document.getElementById('oppName').value = data.name || '';
+            document.getElementById('oppDuration').value = data.duration || '';
+            document.getElementById('oppStartDate').value = data.start_date || '';
+            document.getElementById('oppDescription').value = data.description || '';
+
+            document.getElementById('oppSkills').value =
+                Array.isArray(data.skills) ? data.skills.join(', ') : (data.skills || '');
+
+            document.getElementById('oppCategory').value = data.category || '';
+            document.getElementById('oppFuture').value = data.future_opportunities || '';
+            document.getElementById('oppMaxApplicants').value = data.max_applicants ?? '';
+
+            // set editing state AFTER filling
+            isEditing = true;
+            editingId = id;
+
+            // update modal title
+            const title = document.querySelector('#opportunityModal .modal-header h2');
+            if (title) title.textContent = 'Edit Opportunity';
+
+            // update button text
+            const btn = document.querySelector('#opportunityForm button[type="submit"]');
+            if (btn) btn.textContent = 'Update Opportunity';
+
+        }, 0);
+    })
+    .catch(() => showToast('Network error'));
+}
+
+function deleteOpportunity(id) {
+    if (confirm('Are you sure you want to delete this opportunity?')) {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            showToast('Please login first');
+            return;
+        }
+        fetch(`${API_BASE}/api/opportunities/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast(data.error);
+            } else {
+                showToast('Opportunity deleted successfully!');
+                // remove from UI
+                const card = document.querySelector(`.opportunity-card[data-id="${id}"]`);
+                if (card) card.remove();
+            }
+        })
+        .catch(err => showToast('Network error'));
+    }
+}
 // ===== SEARCH =====
 function openSearch() {
     document.getElementById('searchContainer').classList.add('active');
@@ -200,7 +361,7 @@ function closeSearch() {
 }
 
 // Close search on Escape key
-document.addEventListener('keydown', function(e) {
+document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
         closeSearch();
         closeCourseModal();
@@ -216,7 +377,7 @@ document.addEventListener('keydown', function(e) {
 });
 
 // Close search when clicking outside
-document.getElementById('searchContainer').addEventListener('click', function(e) {
+document.getElementById('searchContainer').addEventListener('click', function (e) {
     if (e.target === this) {
         closeSearch();
     }
@@ -237,32 +398,50 @@ function closeCourseModal() {
 }
 
 // Close modal when clicking outside
-document.getElementById('courseModal').addEventListener('click', function(e) {
+document.getElementById('courseModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeCourseModal();
     }
 });
 
 // ===== OPPORTUNITY DETAILS MODAL =====
-function openOpportunityDetails(title, details) {
-    document.getElementById('opportunityDetailTitle').textContent = title;
-    document.getElementById('opportunityDetailDuration').textContent = details.duration;
-    document.getElementById('opportunityDetailStartDate').textContent = details.startDate;
-    document.getElementById('opportunityDetailApplicants').textContent = details.applicants;
-    document.getElementById('opportunityDetailDescription').textContent = details.description;
-    document.getElementById('opportunityDetailFuture').textContent = details.futureOpportunities;
-    document.getElementById('opportunityDetailPrereqs').textContent = details.prerequisites;
-    
-    const skillsContainer = document.getElementById('opportunityDetailSkills');
-    skillsContainer.innerHTML = '';
-    details.skills.forEach(skill => {
-        const tag = document.createElement('span');
-        tag.className = 'skill-tag';
-        tag.textContent = skill;
-        skillsContainer.appendChild(tag);
-    });
-    
-    document.getElementById('opportunityDetailsModal').classList.add('active');
+function openOpportunityDetails(id) {
+    const token = localStorage.getItem('token');
+    if (!token) {
+        showToast('Please login first');
+        return;
+    }
+    fetch(`${API_BASE}/api/opportunities/${id}`, {
+        headers: { 
+            'Authorization': `Bearer ${token}` 
+        }
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast(data.error);
+                return;
+            }
+            document.getElementById('opportunityDetailTitle').textContent = data.name;
+            document.getElementById('opportunityDetailDuration').textContent = data.duration;
+            document.getElementById('opportunityDetailStartDate').textContent = data.start_date;
+            document.getElementById('opportunityDetailApplicants').textContent = data.max_applicants || 0;
+            document.getElementById('opportunityDetailDescription').textContent = data.description;
+            document.getElementById('opportunityDetailFuture').textContent = data.future_opportunities;
+            document.getElementById('opportunityDetailPrereqs').textContent = '';
+
+            const skillsContainer = document.getElementById('opportunityDetailSkills');
+            skillsContainer.innerHTML = '';
+            data.skills.forEach(skill => {
+                const tag = document.createElement('span');
+                tag.className = 'skill-tag';
+                tag.textContent = skill;
+                skillsContainer.appendChild(tag);
+            });
+
+            document.getElementById('opportunityDetailsModal').classList.add('active');
+        })
+        .catch(err => showToast('Network error'));
 }
 
 function closeOpportunityDetailsModal() {
@@ -274,7 +453,7 @@ function applyToOpportunity() {
     closeOpportunityDetailsModal();
 }
 
-document.getElementById('opportunityDetailsModal').addEventListener('click', function(e) {
+document.getElementById('opportunityDetailsModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeOpportunityDetailsModal();
     }
@@ -306,7 +485,7 @@ function viewCourseDetails(courseName) {
     // In a real app, you would open a detailed course modal
 }
 
-document.getElementById('collaboratorCoursesModal').addEventListener('click', function(e) {
+document.getElementById('collaboratorCoursesModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeCollaboratorCoursesModal();
     }
@@ -314,124 +493,95 @@ document.getElementById('collaboratorCoursesModal').addEventListener('click', fu
 
 // ===== OPPORTUNITY MODAL =====
 function openOpportunityModal() {
+    resetOpportunityModal();
     document.getElementById('opportunityModal').classList.add('active');
 }
 
 function closeOpportunityModal() {
+    resetOpportunityModal();
     document.getElementById('opportunityModal').classList.remove('active');
 }
 
 // Close modal when clicking outside
-document.getElementById('opportunityModal').addEventListener('click', function(e) {
+document.getElementById('opportunityModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeOpportunityModal();
     }
 });
 
 // Handle opportunity form submission
-        document.getElementById('opportunityForm').addEventListener('submit', function(e) {
-            e.preventDefault();
+document.getElementById('opportunityForm').addEventListener('submit', function (e) {
+    e.preventDefault();
 
-            // collect values
-            const name = document.getElementById('oppName').value.trim();
-            const duration = document.getElementById('oppDuration').value.trim();
-            const startDate = document.getElementById('oppStartDate').value;
-            const description = document.getElementById('oppDescription').value.trim();
-            const skillsRaw = document.getElementById('oppSkills').value.trim();
-            const category = document.getElementById('oppCategory').value;
-            const futureOpportunities = document.getElementById('oppFuture').value.trim();
-            const maxApplicants = document.getElementById('oppMaxApplicants').value.trim();
+    // collect values
+    const name = document.getElementById('oppName').value.trim();
+    const duration = document.getElementById('oppDuration').value.trim();
+    const startDate = document.getElementById('oppStartDate').value;
+    const description = document.getElementById('oppDescription').value.trim();
+    const skillsRaw = document.getElementById('oppSkills').value.trim();
+    const category = document.getElementById('oppCategory').value;
+    const futureOpportunities = document.getElementById('oppFuture').value.trim();
+    const maxApplicants = document.getElementById('oppMaxApplicants').value.trim();
 
-            // basic validation
-            if (!name || !duration || !startDate || !description || !skillsRaw || !category || !futureOpportunities) {
-                showToast('Please fill all required fields');
+    // basic validation
+    if (!name || !duration || !startDate || !description || !skillsRaw || !category || !futureOpportunities) {
+        showToast('Please fill all required fields');
+        return;
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+        showToast('Please login first');
+        return;
+    }
+
+    const skills = skillsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+    let method = 'POST';
+    let url = `${API_BASE}/api/opportunities`;
+    if (isEditing) {
+        method = 'PUT';
+        url = `${API_BASE}/api/opportunities/${editingId}`;
+    }
+
+    fetch(url, {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+            name,
+            duration,
+            start_date: startDate,
+            description,
+            skills,
+            category,
+            future_opportunities: futureOpportunities,
+            max_applicants: maxApplicants || null
+        })
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast(data.error);
                 return;
             }
-
-            // parse skills
-            const skills = skillsRaw.split(',').map(s => s.trim()).filter(Boolean);
-
-            // create opportunity card element
-            const card = document.createElement('div');
-            card.className = 'opportunity-card';
-
-            // header and meta
-            const headerHtml = `
-                <div class="opportunity-card-header">
-                    <h5>${escapeHtml(name)}</h5>
-                    <div class="opportunity-meta">
-                        <span><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>${escapeHtml(duration)}</span>
-                        <span><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${escapeHtml(startDate)}</span>
-                    </div>
-                </div>
-                <p class="opportunity-description">${escapeHtml(description)}</p>
-            `;
-
-            // skills tags
-            const skillsHtml = `<div class="opportunity-skills"><div class="opportunity-skills-label">Skills You'll Gain</div><div class="skills-tags">
-                ${skills.map(s => `<span class="skill-tag">${escapeHtml(s)}</span>`).join('')}
-            </div></div>`;
-
-            // footer
-            const applicantsCount = maxApplicants ? `${parseInt(maxApplicants,10)} applicants` : '0 applicants';
-            const footerHtml = `
-                <div class="opportunity-footer">
-                    <span class="applicants-count">${escapeHtml(applicantsCount)}</span>
-                    <button class="view-course-btn" style="width: auto; padding: 8px 16px;">View Details</button>
-                </div>
-            `;
-
-            card.innerHTML = headerHtml + skillsHtml + footerHtml;
-
-            // wire up the View Details button to open details modal
-            const viewBtn = card.querySelector('.view-course-btn');
-            viewBtn.addEventListener('click', function() {
-                openOpportunityDetails(name, {
-                    duration: duration,
-                    startDate: startDate,
-                    description: description,
-                    skills: skills,
-                    applicants: maxApplicants ? parseInt(maxApplicants,10) : 0,
-                    futureOpportunities: futureOpportunities,
-                    prerequisites: ''
-                });
-            });
-
-            // append to grid
-            const grid = document.querySelector('.opportunities-grid');
-            if (grid) grid.appendChild(card);
-
-            showToast('Opportunity created successfully!');
+            showToast(isEditing ? 'Opportunity updated successfully!' : 'Opportunity created successfully!');
+            resetOpportunityModal();
             closeOpportunityModal();
-            this.reset();
-        });
+            loadOpportunities();
+        })
+        .catch(err => showToast('Network error'));
+});
 
-        // small helper to avoid HTML injection when inserting text
-        function escapeHtml(str) {
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }
-
-// ===== QUICK ADD STUDENT MODAL =====
-function openQuickAddModal() {
-    document.getElementById('quickAddModal').classList.add('active');
-}
-
-function closeQuickAddModal() {
-    document.getElementById('quickAddModal').classList.remove('active');
-}
-
-document.getElementById('quickAddModal').addEventListener('click', function(e) {
+document.getElementById('quickAddModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeQuickAddModal();
     }
 });
 
-document.getElementById('quickAddForm').addEventListener('submit', function(e) {
+document.getElementById('quickAddForm').addEventListener('submit', function (e) {
     e.preventDefault();
     showToast('Student added successfully! Email invitation sent.');
     closeQuickAddModal();
@@ -447,13 +597,13 @@ function closeBulkUploadModal() {
     document.getElementById('bulkUploadModal').classList.remove('active');
 }
 
-document.getElementById('bulkUploadModal').addEventListener('click', function(e) {
+document.getElementById('bulkUploadModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeBulkUploadModal();
     }
 });
 
-document.getElementById('bulkUploadForm').addEventListener('submit', function(e) {
+document.getElementById('bulkUploadForm').addEventListener('submit', function (e) {
     e.preventDefault();
     const fileInput = document.getElementById('csvFileInput');
     if (fileInput.files.length === 0) {
@@ -493,13 +643,13 @@ function closeQuickAddVerifierModal() {
     document.getElementById('quickAddVerifierModal').classList.remove('active');
 }
 
-document.getElementById('quickAddVerifierModal').addEventListener('click', function(e) {
+document.getElementById('quickAddVerifierModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeQuickAddVerifierModal();
     }
 });
 
-document.getElementById('quickAddVerifierForm').addEventListener('submit', function(e) {
+document.getElementById('quickAddVerifierForm').addEventListener('submit', function (e) {
     e.preventDefault();
     showToast('Verifier added successfully! Email invitation sent.');
     closeQuickAddVerifierModal();
@@ -515,13 +665,13 @@ function closeBulkUploadVerifierModal() {
     document.getElementById('bulkUploadVerifierModal').classList.remove('active');
 }
 
-document.getElementById('bulkUploadVerifierModal').addEventListener('click', function(e) {
+document.getElementById('bulkUploadVerifierModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeBulkUploadVerifierModal();
     }
 });
 
-document.getElementById('bulkUploadVerifierForm').addEventListener('submit', function(e) {
+document.getElementById('bulkUploadVerifierForm').addEventListener('submit', function (e) {
     e.preventDefault();
     const fileInput = document.getElementById('csvVerifierFileInput');
     if (fileInput.files.length === 0) {
@@ -558,7 +708,7 @@ function openVerifierDetails(name, stats) {
     document.getElementById('verifierTotalStudents').textContent = stats.totalStudents;
     document.getElementById('verifierCertified').textContent = stats.certified;
     document.getElementById('verifierInProgress').textContent = stats.inProgress;
-    
+
     // Populate subjects
     const container = document.getElementById('subjectsContainer');
     container.innerHTML = '';
@@ -571,7 +721,7 @@ function openVerifierDetails(name, stats) {
         `;
         container.appendChild(div);
     });
-    
+
     document.getElementById('verifierDetailsModal').classList.add('active');
 }
 
@@ -579,7 +729,7 @@ function closeVerifierDetailsModal() {
     document.getElementById('verifierDetailsModal').classList.remove('active');
 }
 
-document.getElementById('verifierDetailsModal').addEventListener('click', function(e) {
+document.getElementById('verifierDetailsModal').addEventListener('click', function (e) {
     if (e.target === this) {
         closeVerifierDetailsModal();
     }
@@ -590,20 +740,20 @@ function filterStudents() {
     const statusFilter = document.getElementById('statusFilter').value;
     const dateFrom = document.getElementById('dateFrom').value;
     const dateTo = document.getElementById('dateTo').value;
-    
+
     const rows = document.querySelectorAll('#studentsTableBody tr');
-    
+
     rows.forEach(row => {
         const rowStatus = row.getAttribute('data-status');
         let showRow = true;
-        
+
         // Status filter
         if (statusFilter !== 'all' && rowStatus !== statusFilter) {
             showRow = false;
         }
-        
+
         // Date filters would be implemented here with actual date data
-        
+
         row.style.display = showRow ? '' : 'none';
     });
 }
@@ -613,26 +763,26 @@ function filterVerifiers() {
     const statusFilter = document.getElementById('verifierStatusFilter').value;
     const dateFrom = document.getElementById('verifierDateFrom').value;
     const dateTo = document.getElementById('verifierDateTo').value;
-    
+
     const rows = document.querySelectorAll('#verifiersTableBody tr');
-    
+
     rows.forEach(row => {
         const rowStatus = row.getAttribute('data-status');
         let showRow = true;
-        
+
         // Status filter
         if (statusFilter !== 'all' && rowStatus !== statusFilter) {
             showRow = false;
         }
-        
+
         // Date filters would be implemented here with actual date data
-        
+
         row.style.display = showRow ? '' : 'none';
     });
 }
 
 // ===== LOGIN =====
-document.getElementById('loginForm').addEventListener('submit', function(e) {
+document.getElementById('loginForm').addEventListener('submit', function (e) {
     e.preventDefault();
     clearAllErrors('loginForm');
     let valid = true;
@@ -641,19 +791,39 @@ document.getElementById('loginForm').addEventListener('submit', function(e) {
     const captchaInput = document.getElementById('loginCaptchaInput').value.trim();
 
     if (!email || !isValidEmail(email)) { showError('loginEmailErr'); document.getElementById('loginEmail').classList.add('error'); valid = false; }
-    if (!password) { showError('loginPasswordErr','Please enter your password'); document.getElementById('loginPassword').classList.add('error'); valid = false; }
-    if (!captchaInput) { showError('loginCaptchaErr','Please enter the captcha code'); valid = false; }
-    else if (captchaInput !== captchas.login) { showError('loginCaptchaErr','Captcha does not match. Please try again.'); valid = false; generateCaptcha('login'); }
+    if (!password) { showError('loginPasswordErr', 'Please enter your password'); document.getElementById('loginPassword').classList.add('error'); valid = false; }
+    if (!captchaInput) { showError('loginCaptchaErr', 'Please enter the captcha code'); valid = false; }
+    else if (captchaInput !== captchas.login) { showError('loginCaptchaErr', 'Captcha does not match. Please try again.'); valid = false; generateCaptcha('login'); }
 
     if (!valid) { shakeForm('loginForm'); return; }
 
-    showToast('Login successful! Redirecting...');
-    setTimeout(() => showDashboard(email), 1200);
+    fetch(`${API_BASE}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showError('loginPasswordErr', data.error);
+                shakeForm('loginForm');
+                generateCaptcha('login');
+                return;
+            }
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('admin', JSON.stringify(data.admin));
+            showToast('Login successful! Redirecting...');
+            setTimeout(() => showDashboard(data.admin.email), 1200);
+        })
+        .catch(err => {
+            showToast('Network error');
+            shakeForm('loginForm');
+        });
     generateCaptcha('login');
 });
 
 // ===== SIGNUP =====
-document.getElementById('signupForm').addEventListener('submit', function(e) {
+document.getElementById('signupForm').addEventListener('submit', function (e) {
     e.preventDefault();
     clearAllErrors('signupForm');
     let valid = true;
@@ -667,18 +837,37 @@ document.getElementById('signupForm').addEventListener('submit', function(e) {
     if (!email || !isValidEmail(email)) { showError('signupEmailErr'); document.getElementById('signupEmail').classList.add('error'); valid = false; }
     if (!password || password.length < 8) { showError('signupPasswordErr'); document.getElementById('signupPassword').classList.add('error'); valid = false; }
     if (!confirmPassword || password !== confirmPassword) { showError('signupConfirmPasswordErr'); document.getElementById('signupConfirmPassword').classList.add('error'); valid = false; }
-    if (!captchaInput) { showError('signupCaptchaErr','Please enter the captcha code'); valid = false; }
-    else if (captchaInput !== captchas.signup) { showError('signupCaptchaErr','Captcha does not match.'); valid = false; generateCaptcha('signup'); }
+    if (!captchaInput) { showError('signupCaptchaErr', 'Please enter the captcha code'); valid = false; }
+    else if (captchaInput !== captchas.signup) { showError('signupCaptchaErr', 'Captcha does not match.'); valid = false; generateCaptcha('signup'); }
 
     if (!valid) { shakeForm('signupForm'); return; }
-    showToast('Account created successfully!');
-    generateCaptcha('signup');
-    this.reset(); checkStrength('');
-    setTimeout(() => showPage('loginPage'), 1500);
+
+    fetch(`${API_BASE}/api/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, confirm_password: confirmPassword })
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showError('signupEmailErr', data.error);
+                shakeForm('signupForm');
+                generateCaptcha('signup');
+                return;
+            }
+            showToast('Account created successfully!');
+            generateCaptcha('signup');
+            this.reset(); checkStrength('');
+            setTimeout(() => showPage('loginPage'), 1500);
+        })
+        .catch(err => {
+            showToast('Network error');
+            shakeForm('signupForm');
+        });
 });
 
 // ===== FORGOT =====
-document.getElementById('forgotForm').addEventListener('submit', function(e) {
+document.getElementById('forgotForm').addEventListener('submit', function (e) {
     e.preventDefault();
     clearAllErrors('forgotForm');
     let valid = true;
@@ -686,18 +875,37 @@ document.getElementById('forgotForm').addEventListener('submit', function(e) {
     const captchaInput = document.getElementById('forgotCaptchaInput').value.trim();
 
     if (!email || !isValidEmail(email)) { showError('forgotEmailErr'); document.getElementById('forgotEmail').classList.add('error'); valid = false; }
-    if (!captchaInput) { showError('forgotCaptchaErr','Please enter the captcha code'); valid = false; }
-    else if (captchaInput !== captchas.forgot) { showError('forgotCaptchaErr','Captcha does not match.'); valid = false; generateCaptcha('forgot'); }
+    if (!captchaInput) { showError('forgotCaptchaErr', 'Please enter the captcha code'); valid = false; }
+    else if (captchaInput !== captchas.forgot) { showError('forgotCaptchaErr', 'Captcha does not match.'); valid = false; generateCaptcha('forgot'); }
 
     if (!valid) { shakeForm('forgotForm'); return; }
-    showToast('Reset link sent to your email!');
-    generateCaptcha('forgot');
-    this.reset();
+
+    fetch(`${API_BASE}/api/forgot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+    })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showError('forgotEmailErr', data.error);
+                shakeForm('forgotForm');
+                generateCaptcha('forgot');
+                return;
+            }
+            showToast('Reset link sent to your email!');
+            generateCaptcha('forgot');
+            this.reset();
+        })
+        .catch(err => {
+            showToast('Network error');
+            shakeForm('forgotForm');
+        });
 });
 
 // Clear errors on input
 document.querySelectorAll('input').forEach(input => {
-    input.addEventListener('input', function() {
+    input.addEventListener('input', function () {
         this.classList.remove('error');
         const err = this.closest('.form-group')?.querySelector('.error-msg');
         if (err) err.classList.remove('show');
@@ -708,4 +916,13 @@ document.querySelectorAll('input').forEach(input => {
 window.addEventListener('resize', () => {
     const toggle = document.getElementById('menuToggle');
     if (toggle) toggle.style.display = window.innerWidth <= 768 ? 'flex' : 'none';
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+    const token = localStorage.getItem('token');
+    const admin = localStorage.getItem('admin');
+
+    if (token && admin) {
+        showDashboard(JSON.parse(admin).email);
+    }
 });
