@@ -1,25 +1,5 @@
 # 📘 CertifyMe — Full Stack Intern Assessment
 
----
-
-## 🚀 Getting Started
-
-1. **Clone the provided repository**
-   ```bash
-   git clone https://github.com/Neerajvs32/Test1.git
-   ```
-
-2. **Create your own GitHub repository**
-   - Push the cloned project to your own GitHub account.
-   - Share your repository link after completing the task.
-
-3. **Development Requirement**
-   - Both Frontend and Backend must run together.
-   - The UI must remain exactly the same.
-   - ❌ Do NOT modify frontend design or components.
-   - ✅ Build the backend required for the existing UI functionality.
-
----
 
 ## 🏢 Project Overview
 
